@@ -19,3 +19,6 @@ mvn spring-boot:run
 ```  
 ## Extend
 You can add the interfaces with function create and manager the users and rooms, just manage the h2db table `user` & `room`. 
+## Notice
+- It is a plain text chatroom. Image and file is illegal. 
+- It is a simple chatroom, so the history message won't be saved.
