@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>聊天室</title>
+    <script src="../asset/react.min.js"></script>
+    <script src="../asset/react-dom.min.js"></script>
+    <script src="../asset/babel.min.js"></script>
+    <script src="../asset/jquery-1.10.2.min.js"></script>
+    <script src="../asset/lodash.min.js"></script>
+    <script src="../asset/mqtt.min.js"></script>
+    <style>
+        input{
+            height: 30px;
+            border-radius: 30px;
+        }
+        #login{
+            margin-top: 15px;
+            height: 30px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+<div id="main"></div>
+<script type="text/babel">
+    var client;
+    var server="http://localhost:8080/web/";
+    var Login = React.createClass({
+        getInitialState: function() {
+            return {username: 'frank',password:'12345',display:''};
+        },
+        change : function(event) {
+            this.setState({[event.target.name]: event.target.value})
+        },
+        click : function (event) {
+            let opts={
+                protocol:"ws",
+                host:"127.0.0.1",
+                port:8083,
+                path:"/mqtt"
+            };
+            opts.username=this.state.username;
+            opts.clientId=this.state.username;
+            opts.password=this.state.password;
+            client=mqtt.connect(opts);
+            client.on('connect',this.connected);
+        },
+        connected: function () {
+            console.log("mqtt 连接成功");
+            ReactDOM.render(
+                    <Rooms username={this.state.username}/>,
+                document.getElementById('main')
+            );
+        },
+        render: function() {
+            let value = this.state.value;
+            let display=this.state.display;
+            let style= {width:'400px'};
+            let divstyle={
+                position:'absolute',
+                left:'50%', top:'50%',width: '400px',height: '250px',padding: '30px','margin-left': '-200px', 'margin-top': '-125px',
+                'border': 'solid 1px',
+                display:display
+            }
+            return <div style={divstyle}>
+                <h3>username</h3>
+                <input name="username" type="text" style={style} value={this.state.username} onChange={this.change}/>
+                <h3>password</h3>
+                <input name="password" type="password" style={style} value={this.state.password} onChange={this.change}/>
+                <center>
+                    <button id="login" onClick={this.click}>login</button>
+                </center>
+            </div>;
+        }
+    });
+    var Rooms = React.createClass({
+        firstLoad:true,
+        getInitialState: function() {
+            return {rooms:[]}
+        },
+        getRooms:function (data,status) {
+            if(status=='success'){
+                this.setState({rooms:data});
+            }
+        },
+        init:function () {
+            if(this.firstLoad){
+                $.get(server+"rooms",this.getRooms);
+                this.firstLoad=false;
+            }
+        },
+        join:function (username,roomid) {
+            $.ajax({
+                url:server+"access",
+                type:"GET",
+                data:{username:username,roomid:roomid},
+                success : function (data,status) {
+                    if(status=='success'){
+                        client.subscribe("/chat/"+roomid);
+                        ReactDOM.render(
+                            <Chat username={username} roomid={roomid}/>,
+                            document.getElementById("main")
+                        )
+                    }
+                },
+                error : function(xhr,textStatus,errorThrown){
+                    if (xhr.status == 401||xhr.status==403) {
+                        alert("没有权限进入这个房间")
+                    } else{
+                        alert("出错啦")
+                    }
+                }
+            });
+
+        },
+        render:function () {
+            this.init();
+            let username=this.props.username;
+            let divstyle={
+                position:'absolute',
+                left:'50%', top:'50%',width: '400px',height: '250px',padding: '30px','margin-left': '-200px', 'margin-top': '-125px',
+                'border': 'solid 1px',
+            };
+            let rooms =this.state.rooms;
+            let that=this;
+            let content = rooms.map(function (item) {
+                return <tr>
+                    <td>{item.roomname}</td>
+                    <td>{item.issecret.toString()}</td>
+                    <td><a href="#" onClick={that.join.bind(that, username,item.roomid)} >进入房间</a></td>
+                </tr>
+            });
+            return <div style={divstyle}>
+                <table>
+                    <tr><th>房间名</th><th>是否私密</th><th>操作</th></tr>
+                    {content}
+                </table>
+            </div>
+        }
+    });
+    var Chat = React.createClass({
+        getInitialState: function() {
+            return {content:"",input:"",users:[]}
+        },
+        firstLoad:true,
+        init: function () {
+            let roomid=this.props.roomid;
+            if(this.firstLoad){
+                let that = this;
+                console.log("message监听")
+                this.firstLoad=false;
+                client.on('message',this.show);
+                $.get(server+'users',{roomid:roomid},function (data) {
+                    that.setState({users:data});
+                })
+                setInterval(function () {
+                    $.get(server+'users',{roomid:roomid},function (data) {
+                        that.setState({users:data});
+                    })
+                },10000)
+            }
+        },
+        show:function (topic, msg) {
+            let msgstr=msg.toString();
+            this.setState({content:this.state.content+"\r\n"+msgstr});
+        },
+        send: function () {
+            if(this.state.input.trim()) {
+                client.publish("/chat/" + this.props.roomid, this.props.username + ":\r\n\t" + this.state.input);
+                this.setState({input:""})
+            }
+            else{
+                alert("内容不要为空啦")
+            }
+        },
+        keydown:function (e) {
+            if(e.keyCode===13){
+                e.preventDefault();
+                this.send();
+            }
+        },
+        inhandle:function (event) {
+            this.setState({input:event.target.value})
+        },
+        goRooms: function () {
+            client.unsubscribe("/chat/"+this.props.roomid) ;
+            ReactDOM.render(
+                    <Rooms username={this.props.username}/>,
+                document.getElementById('main')
+            );
+        },
+        render:function () {
+            this.init()
+            let textstyle= {float:'left','margin':'100px','margin-right':'10px',width:"60%",height:"500px",display:"inline"}
+            let inputstyle= {'margin':'0 100px',width:"80%",height:"100px"}
+            let usstyle = {'margin':'100px','margin-left':'0',width:"20%"}
+            let btnstyle={'float':'right','margin':'10px 200px',width:'80px',height:'40px'}
+            let olstyle={float:'left','margin':'100px'}
+            let users = this.state.users.map(function (item) {
+                            return <li>
+                                    {item.username}
+                                    &nbsp;
+                                {item.online?<span>在线</span>:<span>离线</span>}
+                                </li>
+                    })
+            ;
+
+
+            return <div>
+                <textarea style={textstyle} value={this.state.content}></textarea>
+                <ul style={olstyle}>
+                    {users}
+                    <button onClick={this.goRooms}>回到房间列表</button>
+                </ul>
+                <textarea style={inputstyle} onChange={this.inhandle} value={this.state.input} onKeyDown={this.keydown}></textarea>
+                <div>
+                    <button style={btnstyle} onClick={this.send}>发送</button>
+                </div>
+            </div>
+        }
+    });
+    ReactDOM.render(
+        <Login />,
+        document.getElementById('main')
+    );
+</script>
+
+</body>
+</html>
